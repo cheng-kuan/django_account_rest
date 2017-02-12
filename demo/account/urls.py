@@ -21,7 +21,7 @@ urlpatterns = [
     url(r'^login/$', views.UserLogin.as_view()),
     url(r'^logout/$', views.UserLogout.as_view()),
     url(r'^info/$', views.UserInformation.as_view()),
-    url(r'^change_password/$', views.ModifyPassword.as_view()),
+    url(r'^change_password/$', views.ChangePassword.as_view()),
     url(r'^find_password/$', views.FindPassword.as_view()),
     url(r'^reset_password/(?P<url_token>[0-9a-f]{64})/$', views.ResetPassword.as_view()),
     

@@ -14,6 +14,7 @@ from django.http import HttpResponse
 from django.utils import timezone
 
 from rest_framework import status
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
         
@@ -23,9 +24,10 @@ from .models import UserProfile, ResetPasswordToken
 # 這個 Method 是用來測試查看使用者資訊，僅供測試用
 # Precondition: None
 class UserInformation(APIView):
-    def get(self, request):
-        if not request.user.is_authenticated():
-            return Response({"auth":"Anonymous user"}, status=200)        
+
+    permission_classes = (IsAuthenticated,)
+
+    def get(self, request):        
         user = request.user
         user_info = {
             "username": user.username, 
@@ -42,6 +44,7 @@ class UserInformation(APIView):
 #   1. 使用者必須是尚未登入的狀態
 #   2. username, email 不可與其他帳號重複
 class UserCreate(APIView):
+
     def get(self, request):
         if request.user.is_authenticated():
             return Response({"error":"使用者已登入"},
@@ -49,10 +52,13 @@ class UserCreate(APIView):
         return render(request, "register.html")
 
     def post(self, request):
+        if request.user.is_authenticated():
+            return Response({"error":"使用者已登入"},
+            status=status.HTTP_400_BAD_REQUEST)
         try:
-            username = request.data["username"]
-            password = request.data["password"]
-            confirm_password = request.data["confirm_password"]
+            username = request.data.get("username", None)
+            password = request.data.get("password", None)
+            confirm_password = request.data.get("confirm_password", None)
         except KeyError:
             return Response({"error": "欄位尚未填寫完整"},
             status=status.HTTP_422_UNPROCESSABLE_ENTITY)
@@ -103,16 +109,19 @@ class UserCreate(APIView):
 # 這裏沒有檢查 username format 是不是 email 是因為我們先排除了 Oauth 帳戶
 # 接著用 authenticate 去驗證帳戶是不是存在，所以可以不用驗證
 class UserLogin(APIView):
+
     def get(self, request):
         if request.user.is_authenticated():
             return Response({"error":"already_login"}, status=status.HTTP_400_BAD_REQUEST)
-        return render(request, "login.html")
+        return render(request,"login.html")
 
     def post(self, request):
+        if request.user.is_authenticated():
+            return Response({"error":"already_login"}, status=status.HTTP_400_BAD_REQUEST)
         # 欄位檢驗
         try:
-            username = request.data["username"]
-            password = request.data["password"]
+            username = request.data.get("username", None)
+            password = request.data.get("password", None)
         except KeyError:
             return Response({"error": "請輸入username, password"},
             status=status.HTTP_422_UNPROCESSABLE_ENTITY)
@@ -144,40 +153,35 @@ class UserLogin(APIView):
 #   1. 使用者必須是已登入狀態, Oauth 使用者也可以登出
 #   2. 欄位: 沒有額外需求
 class UserLogout(APIView):
-    def get(self, request):
-        if not request.user.is_authenticated():
-            return Response({"error": "使用者尚未登入"},
-            status=status.HTTP_401_UNAUTHORIZED)        
+
+    permission_classes = (IsAuthenticated,)
+
+    def get(self, request):     
         logout(request)
         return Response(status=status.HTTP_200_OK)
 
-    '''
-    def post(self, request):
-        if not request.user.is_authenticated():
-            return Response({"error": "使用者尚未登入"},
-            status=status.HTTP_401_UNAUTHORIZED)        
+    def post(self, request):        
         logout(request)
         return Response(status=status.HTTP_200_OK)
-    '''
 
 
 # Precondition:
 #   1. 使用者必須為登入狀態才可以更改密碼
 #   2. Oauth 使用者不可以更改密碼
-class ModifyPassword(APIView):
+class ChangePassword(APIView):
+
+    permission_classes = (IsAuthenticated,)
+
     def get(self, request):
-        if not request.user.is_authenticated():
-            return Response(status=status.HTTP_401_UNAUTHORIZED)
         if request.user.social_auth.exists():
-            return Response({"error": "Oauth 帳戶不能修改密碼"}, 
-            status=status.HTTP_403_FORBIDDEN)
+            return Response({"error": "Oauth 帳戶不能修改密碼"}, status=status.HTTP_403_FORBIDDEN)
         return render(request, "change_password.html")
 
     def post(self, request):
         try:
-            current_password = request.data['current_password']
-            new_password = request.data['new_password']
-            confirm_new_password = request.data['confirm_new_password']
+            current_password = request.data.get("current_password", None)
+            new_password = request.data.get("new_password", None)
+            confirm_new_password = request.data.get("confirm_new_password", None)
         except KeyError:
             return Response({"error": "請填寫完所有欄位"},
             status=status.HTTP_422_UNPROCESSABLE_ENTITY)
@@ -210,7 +214,7 @@ class FindPassword(APIView):
 
     def post(self, request):
         try:
-            email = request.data['email']
+            email = request.data.get("email", None)
             validate_email(email)
         except KeyError:
             return Response({"error":"沒有email欄位"},
@@ -294,6 +298,10 @@ class ResetPassword(APIView):
         return render(request, "reset_password.html")
 
     def post(self, request, url_token):
+        # 不讓已登入的人來找密碼
+        if request.user.is_authenticated():
+            return Response({"error":"使用者已登入，不可重置密碼"},
+            status=status.HTTP_400_BAD_REQUEST)
         # Dynamic URL Token Validation
         try:
             user_reset_password_token = ResetPasswordToken.objects.get(dynamic_url=url_token)
