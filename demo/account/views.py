@@ -19,11 +19,12 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
         
 from .models import UserProfile, ResetPasswordToken
+from .utils import is_valid_password
 
 
 # 這個 Method 是用來測試查看使用者資訊，僅供測試用
 # Precondition: None
-class UserInformation(APIView):
+class UserInfoView(APIView):
 
     permission_classes = (IsAuthenticated,)
 
@@ -43,7 +44,7 @@ class UserInformation(APIView):
 # Precondition:
 #   1. 使用者必須是尚未登入的狀態
 #   2. username, email 不可與其他帳號重複
-class UserCreate(APIView):
+class UserCreateView(APIView):
 
     def get(self, request):
         if request.user.is_authenticated():
@@ -55,11 +56,12 @@ class UserCreate(APIView):
         if request.user.is_authenticated():
             return Response({"error":"使用者已登入"},
             status=status.HTTP_400_BAD_REQUEST)
-        try:
-            username = request.data.get("username", None)
-            password = request.data.get("password", None)
-            confirm_password = request.data.get("confirm_password", None)
-        except KeyError:
+
+        username = request.data.get("username", "")
+        password = request.data.get("password", "")
+        confirm_password = request.data.get("confirm_password", "")
+
+        if username == "" or password == "" or confirm_password == "":
             return Response({"error": "欄位尚未填寫完整"},
             status=status.HTTP_422_UNPROCESSABLE_ENTITY)
         
@@ -77,17 +79,16 @@ class UserCreate(APIView):
             return Response({"error":"email_format_error"},
             status=status.HTTP_400_BAD_REQUEST)
         
-        # TODO password format validation
-        
+        if not is_valid_password(password):
+            return Response({"error":"密碼格式錯誤"},
+            status=status.HTTP_400_BAD_REQUEST)
+
         # password confirm validation
         if password != confirm_password:
             return Response({"error":"password_confirmation_failed"},
             status=status.HTTP_400_BAD_REQUEST)
         
-        # create user
-        user = User(username=username)
-        user.set_password(password)
-        user.save()
+        user = User.objects.create_user(username=username, password=password)
         
         # 同步 nickname, contact_email
         # 不用 check user profile model 是不是有建立連結
@@ -108,7 +109,7 @@ class UserCreate(APIView):
 #       username, password
 # 這裏沒有檢查 username format 是不是 email 是因為我們先排除了 Oauth 帳戶
 # 接著用 authenticate 去驗證帳戶是不是存在，所以可以不用驗證
-class UserLogin(APIView):
+class LoginView(APIView):
 
     def get(self, request):
         if request.user.is_authenticated():
@@ -119,10 +120,11 @@ class UserLogin(APIView):
         if request.user.is_authenticated():
             return Response({"error":"already_login"}, status=status.HTTP_400_BAD_REQUEST)
         # 欄位檢驗
-        try:
-            username = request.data.get("username", None)
-            password = request.data.get("password", None)
-        except KeyError:
+
+        username = request.data.get("username", "")
+        password = request.data.get("password", "")
+
+        if username == "" or password == "":
             return Response({"error": "請輸入username, password"},
             status=status.HTTP_422_UNPROCESSABLE_ENTITY)
         
@@ -152,7 +154,7 @@ class UserLogin(APIView):
 # Precondition:
 #   1. 使用者必須是已登入狀態, Oauth 使用者也可以登出
 #   2. 欄位: 沒有額外需求
-class UserLogout(APIView):
+class LogoutView(APIView):
 
     permission_classes = (IsAuthenticated,)
 
@@ -168,7 +170,7 @@ class UserLogout(APIView):
 # Precondition:
 #   1. 使用者必須為登入狀態才可以更改密碼
 #   2. Oauth 使用者不可以更改密碼
-class ChangePassword(APIView):
+class ChangePasswordView(APIView):
 
     permission_classes = (IsAuthenticated,)
 
@@ -178,25 +180,27 @@ class ChangePassword(APIView):
         return render(request, "change_password.html")
 
     def post(self, request):
-        try:
-            current_password = request.data.get("current_password", None)
-            new_password = request.data.get("new_password", None)
-            confirm_new_password = request.data.get("confirm_new_password", None)
-        except KeyError:
+        current_password = request.data.get("current_password", "")
+        new_password = request.data.get("new_password", "")
+        confirm_new_password = request.data.get("confirm_new_password", "")
+
+        if current_password == "" or new_password == "" or confirm_new_password == "":
             return Response({"error": "請填寫完所有欄位"},
             status=status.HTTP_422_UNPROCESSABLE_ENTITY)
-       
-        user = request.user
-        if not user.check_password(current_password):
-            return Response({"error":"與目前密碼不符"},
+
+        if not is_valid_password(new_password):
+            return Response({"error":"密碼格式錯誤"},
             status=status.HTTP_400_BAD_REQUEST)
 
         if new_password != confirm_new_password:
             return Response({"error":"新密碼與確認密碼不一致"},
             status=status.HTTP_400_BAD_REQUEST)
 
-        # TODO password format validation
-        
+        user = request.user
+        if not user.check_password(current_password):
+            return Response({"error":"與目前密碼不符"},
+            status=status.HTTP_400_BAD_REQUEST)
+
         user.set_password(new_password)
         user.save()
 
@@ -205,7 +209,7 @@ class ChangePassword(APIView):
 
 # Precondition:
 #   1. Oauth 使用者不可以尋找密碼
-class FindPassword(APIView):
+class FindPasswordView(APIView):
     # missing password 要填的資料: email
     # 填完後送出後，會寄一封信件給 user, 內容夾帶著 reset password
     # 的連結。
@@ -213,30 +217,29 @@ class FindPassword(APIView):
         return render(request, "find_password.html")
 
     def post(self, request):
-        try:
-            email = request.data.get("email", None)
-            validate_email(email)
-        except KeyError:
+
+        email = request.data.get("email", "")
+
+        if email == "":
             return Response({"error":"沒有email欄位"},
             status=status.HTTP_422_UNPROCESSABLE_ENTITY)
+
+        try:
+            validate_email(email)
         except ValidationError:
-            # 必須要 validate 因為 facebook 不一定能夠取得 email
-            # 會造成多個 email == "" 的情況，後面的 User.objects.get
-            # 就不能使用了
             return Response({"error":"email 格式錯誤"},
             status=status.HTTP_400_BAD_REQUEST)
-        else:
-            # TODO 因為 username is unique data, 這的 filter 可以改變寫法
-            user_exist = User.objects.filter(username=email).exists()
-            if not user_exist:
-                return Response({"error": "沒有這個 email 的使用者"},
-                status=status.HTTP_403_FORBIDDEN)
-        
-        # 因為 Oauth 帳戶沒有密碼，所以不提供這功能
-        user = User.objects.get(username=email)
-        if user.social_auth.exists():
-            return Response({"error":"Oauth user 不能使用這個功能"},
+
+        try:
+            user = User.objects.get(username=email)
+        except User.DoesNotExist:
+            return Response({"error": "沒有這個 Email 帳號"},
             status=status.HTTP_403_FORBIDDEN)
+        else:
+        # 因為 Oauth 帳戶沒有密碼，所以不提供這功能
+            if user.social_auth.exists():
+                return Response({"error":"Oauth user 不能使用這個功能"},
+                status=status.HTTP_403_FORBIDDEN)
         
         # generate reset password url
         url_seed = (email + time.ctime() + "#$@%$").encode("utf-8")
@@ -288,7 +291,7 @@ class FindPassword(APIView):
 # Precondition:
 #   1. 使用者不可為登入狀態
 #   2. Oauth 使用者不可以尋找密碼
-class ResetPassword(APIView):
+class ResetPasswordView(APIView):
     # 設定成功之後，沒有限制操作次數
     def get(self, request, url_token):
         # 不讓已登入的人來找密碼
@@ -315,21 +318,24 @@ class ResetPassword(APIView):
             status=status.HTTP_403_FORBIDDEN)
 
         # Request Data Validation 
-        try:
-            new_password = request.data['new_password']
-            confirm_new_password = request.data['confirm_new_password']
-            entry_token = request.data['entry_token']
-        except KeyError:
+        new_password = request.data.get('new_password', "")
+        confirm_new_password = request.data.get('confirm_new_password', "")
+        entry_token = request.data.get('entry_token', "")
+
+        if new_password == "" or confirm_new_password == "" or entry_token == "":
             return Response({"error":"欄位沒有填寫完整"},
             status=status.HTTP_422_UNPROCESSABLE_ENTITY)
-        else:
-            if new_password != confirm_new_password or\
-            entry_token != user_reset_password_token.entry_token:
-                return Response({"error":"輸入不一致或是驗證碼錯誤"},
-                status=status.HTTP_400_BAD_REQUEST)
-        
-        # TODO Password Validation
 
+        password_confirm_failed = (new_password != confirm_new_password)
+        entry_token_invalid = (entry_token != user_reset_password_token.entry_token)
+        if password_confirm_failed or entry_token_invalid:
+            return Response({"error":"輸入不一致或是驗證碼錯誤"},
+            status=status.HTTP_400_BAD_REQUEST)
+
+        if not is_valid_password(new_password):
+            return Response({"error":"密碼格式錯誤"},
+            status=status.HTTP_400_BAD_REQUEST)
+        
         # Reset Password
         user = user_reset_password_token.user
         user.set_password(new_password)

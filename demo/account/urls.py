@@ -17,13 +17,13 @@ from django.conf.urls import url, include
 from account import views
 
 urlpatterns = [
-    url(r'^register/$', views.UserCreate.as_view()),
-    url(r'^login/$', views.UserLogin.as_view()),
-    url(r'^logout/$', views.UserLogout.as_view()),
-    url(r'^info/$', views.UserInformation.as_view()),
-    url(r'^change_password/$', views.ChangePassword.as_view()),
-    url(r'^find_password/$', views.FindPassword.as_view()),
-    url(r'^reset_password/(?P<url_token>[0-9a-f]{64})/$', views.ResetPassword.as_view()),
+    url(r'^register/$', views.UserCreateView.as_view()),
+    url(r'^login/$', views.LoginView.as_view()),
+    url(r'^logout/$', views.LogoutView.as_view()),
+    url(r'^info/$', views.UserInfoView.as_view()),
+    url(r'^change_password/$', views.ChangePasswordView.as_view()),
+    url(r'^find_password/$', views.FindPasswordView.as_view()),
+    url(r'^reset_password/(?P<url_token>[0-9a-f]{64})/$', views.ResetPasswordView.as_view()),
     
     url(r'', include('rest_framework_social_oauth2.urls'))
 ]
